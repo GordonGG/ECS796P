@@ -102,16 +102,16 @@
                 <version>1.2.1</version>
                 <executions>
                     <execution>
-                        <id>server</id>
+                        <id>grpcServer</id>
                         <goals>
                             <goal>java</goal>
                         </goals>
                         <configuration>
-                            <mainClass>com.dscoursework.grpc.server.GrpcServer</mainClass>
+                            <mainClass>com.dscoursework.server.GrpcServer</mainClass>
                         </configuration>
                     </execution>
                     <execution>
-                        <id>client</id>
+                        <id>grpClient</id>
                         <goals>
                             <goal>java</goal>
                         </goals>
