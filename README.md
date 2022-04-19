@@ -1,5 +1,6 @@
 # ECS796P-coursework
-This is the coursework of ECS796P Distribute System Option 2 which base in lab1 and lab2
+This is the coursework of ECS796P Distribute System Option 2 which base in lab1 and lab2.
+Student name :Tianhong Gao
 Using Springboot 
 ## how to start?
 1. sudo apt uodate 
