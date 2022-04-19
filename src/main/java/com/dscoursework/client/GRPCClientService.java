@@ -57,9 +57,6 @@ public class GRPCClientService {
 
 	/**
 	 * Takes the indices of the stubs that have not been used recently and adds them to the back of the queue.
-	 * @param num
-	 * @return indices of the num stubs
-	 * @throws InterruptedException
 	 */
 	private int[] takeStubIndices(int num) throws InterruptedException {
 		int[] indices = new int[num];
@@ -101,10 +98,10 @@ public class GRPCClientService {
 	//private static final int MAX = 4;
 
 	public String multiplyMatrixFiles(String matrixStringA, String matrixStringB, long deadline) throws InvalidMatrixException, ExecutionException, InterruptedException {
-		int[][] A = stringToMatrixArray(matrixStringA);
-		int[][] B = stringToMatrixArray(matrixStringB);
-		System.out.println("The first Matrix is: " + MatrixOperation.encodeMatrix(A));
-		System.out.println("The second Matrix is  : " + MatrixOperation.encodeMatrix(B));
+		int[][] A = stringToArray(matrixStringA);
+		int[][] B = stringToArray(matrixStringB);
+		MatrixOperation.encodeMatrix(A);
+		MatrixOperation.encodeMatrix(B);
 		long startTime = System.nanoTime();
 
 		int[][] MatrixBlock = multiplyMatrixBlock(A, B, deadline);
@@ -114,16 +111,20 @@ public class GRPCClientService {
 		return MatrixOperation.encodeMatrix(MatrixBlock);
 	}
 
+
 	public String addMatrixFiles(String matrixStringA, String matrixStringB, long deadline) throws InvalidMatrixException, ExecutionException, InterruptedException {
-		int[][] A = stringToMatrixArray(matrixStringA);
-		int[][] B = stringToMatrixArray(matrixStringB);
-		System.out.println("The first Matrix is:" + MatrixOperation.encodeMatrix(A));
-		System.out.println("The second Matrix is  : " + MatrixOperation.encodeMatrix(B));
+		int[][] A = stringToArray(matrixStringA);
+		int[][] B = stringToArray(matrixStringB);
+		long startTime = System.nanoTime();
 		int[][] MatrixBlock = addBlock(A, B,1);
+		long endTime = System.nanoTime();
+		long time = endTime-startTime;
+		System.out.println("Using 4 servers" );
+		System.out.println("Time spend  "+time+ " ns" );
 		return MatrixOperation.encodeMatrix(MatrixBlock);
 	}
 
-	public static int[][] stringToMatrixArray(String matrixString) throws InvalidMatrixException {
+	public static int[][] stringToArray(String matrixString) throws InvalidMatrixException {
 		// convert matrix string to lines and columns
 		String[] lines = matrixString.trim().split("\n");
 		String[] columns = lines[0].trim().split(" ");
@@ -164,9 +165,68 @@ public class GRPCClientService {
 	/**
 	 * Add integer matrices via gRPC
 	 */
+	private HashMap<String,int[][]> splitBlocks(int[][] A, int[][] B) {
+
+		int MAX = A.length;
+		int bSize = MAX/2;
+
+		int[][] A1 = new int[MAX][MAX];
+		int[][] A2 = new int[MAX][MAX];
+		int[][] B1 = new int[MAX][MAX];
+		int[][] B2 = new int[MAX][MAX];
+		int[][] C1 = new int[MAX][MAX];
+		int[][] C2 = new int[MAX][MAX];
+		int[][] D1 = new int[MAX][MAX];
+		int[][] D2 = new int[MAX][MAX];
+
+		for (int i = 0; i < bSize; i++)
+		{
+			for (int j = 0; j < bSize; j++)
+			{
+				A1[i][j]=A[i][j];
+				A2[i][j]=B[i][j];
+			}
+		}
+		for (int i = 0; i < bSize; i++)
+		{
+			for (int j = bSize; j < MAX; j++)
+			{
+				B1[i][j-bSize]=A[i][j];
+				B2[i][j-bSize]=B[i][j];
+			}
+		}
+		for (int i = bSize; i < MAX; i++)
+		{
+			for (int j = 0; j < bSize; j++)
+			{
+				C1[i-bSize][j]=A[i][j];
+				C2[i-bSize][j]=B[i][j];
+			}
+		}
+		for (int i = bSize; i < MAX; i++)
+		{
+			for (int j = bSize; j < MAX; j++)
+			{
+				D1[i-bSize][j-bSize]=A[i][j];
+				D2[i-bSize][j-bSize]=B[i][j];
+			}
+		}
+
+		HashMap<String, int[][]> blocks = new HashMap<>();
+		blocks.put("A1", A1);
+		blocks.put("A2", A2);
+		blocks.put("B1", B1);
+		blocks.put("B2", B2);
+		blocks.put("C1", C1);
+		blocks.put("C2", C2);
+		blocks.put("D1", D1);
+		blocks.put("D2", D2);
+
+		return blocks;
+	}
+
 
 	private int[][] addBlock(int A[][], int B[][], int stubIndex) {
-		System.out.println("Calling addBlock on server " + (stubIndex + 1));
 		MatrixRequest request = generateRequest(A, B);
 		MatrixResponse matrixAddResponse = this.stubs[stubIndex].addBlock(request);
 		int[][] summedMatrix = MatrixOperation.decodeMatrix(matrixAddResponse.getMatrix());
@@ -178,7 +238,6 @@ public class GRPCClientService {
 	 * Multiply integer matrices via gRPC
 	 */
 	private int[][] multiplyBlock(int A[][], int B[][], int stubIndex) {
-		System.out.println("Calling multiplyBlock on server " + (stubIndex+1));
 		MatrixRequest request = generateRequest(A, B);
 		MatrixResponse matrixMultiplyResponse = this.stubs[stubIndex].multiplyBlock(request);
 		int[][] multipliedMatrix = MatrixOperation.decodeMatrix(matrixMultiplyResponse.getMatrix());
@@ -207,6 +266,11 @@ public class GRPCClientService {
 	 * Multiplies matrices using addBlock and multiplyBlock
 	 * From BlockMult.java
 	 */
+	private int caculateServer(long deadline, long footprint){
+		long numBlockCalls = 11L;
+		return (int) Math.ceil((float)footprint*(float)numBlockCalls/(float)deadline);
+	}
+
 	private int[][] multiplyMatrixBlock(int[][] A, int[][] B, long deadline) throws InterruptedException, ExecutionException {
 
 		// split matrix blocks into smaller blocks
@@ -214,7 +278,7 @@ public class GRPCClientService {
 
 		// get first gRPC server stub
 		int firstStubIndex = takeStubIndices(1)[0];
-
+		long numBlockCalls = 11L;
 		// footprint algorithm to see how long first call takes
 		long Time1 = System.nanoTime();
 
@@ -226,12 +290,10 @@ public class GRPCClientService {
 		long Time2 = System.nanoTime();
 		long footprint= Time2-Time1;
 		System.out.println("The foot print of one block:"+ footprint +" ns");
-		// remaining block calls
-		long numBlockCalls = 11L;
-		int numberServer = (int) Math.ceil((float)footprint*(float)numBlockCalls/(float)deadline);
+		int numberServer = caculateServer(deadline,footprint);
 		numberServer = numberServer <= 8 ? numberServer : 8;
 
-		System.out.println("Using "+ numberServer + " servers for rest of calculation");
+		System.out.println("Using "+ numberServer + " servers for  calculation");
 
 		// take the least recently used stub indices for this workload to reduce traffic
 		int[] indices = takeStubIndices(numberServer);
@@ -395,63 +457,5 @@ public class GRPCClientService {
 		return res;
 	}
 
-	private HashMap<String,int[][]> splitBlocks(int[][] A, int[][] B) {
 
-		int MAX = A.length;
-		int bSize = MAX/2;
-
-		int[][] A1 = new int[MAX][MAX];
-		int[][] A2 = new int[MAX][MAX];
-		int[][] B1 = new int[MAX][MAX];
-		int[][] B2 = new int[MAX][MAX];
-		int[][] C1 = new int[MAX][MAX];
-		int[][] C2 = new int[MAX][MAX];
-		int[][] D1 = new int[MAX][MAX];
-		int[][] D2 = new int[MAX][MAX];
-
-		for (int i = 0; i < bSize; i++)
-		{
-			for (int j = 0; j < bSize; j++)
-			{
-				A1[i][j]=A[i][j];
-				A2[i][j]=B[i][j];
-			}
-		}
-		for (int i = 0; i < bSize; i++)
-		{
-			for (int j = bSize; j < MAX; j++)
-			{
-				B1[i][j-bSize]=A[i][j];
-				B2[i][j-bSize]=B[i][j];
-			}
-		}
-		for (int i = bSize; i < MAX; i++)
-		{
-			for (int j = 0; j < bSize; j++)
-			{
-				C1[i-bSize][j]=A[i][j];
-				C2[i-bSize][j]=B[i][j];
-			}
-		}
-		for (int i = bSize; i < MAX; i++)
-		{
-			for (int j = bSize; j < MAX; j++)
-			{
-				D1[i-bSize][j-bSize]=A[i][j];
-				D2[i-bSize][j-bSize]=B[i][j];
-			}
-		}
-
-		HashMap<String, int[][]> blocks = new HashMap<>();
-		blocks.put("A1", A1);
-		blocks.put("A2", A2);
-		blocks.put("B1", B1);
-		blocks.put("B2", B2);
-		blocks.put("C1", C1);
-		blocks.put("C2", C2);
-		blocks.put("D1", D1);
-		blocks.put("D2", D2);
-
-		return blocks;
-	}
 }
